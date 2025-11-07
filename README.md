@@ -30,6 +30,14 @@ A Python script to scrape all reviews from any Amazon product page and save them
 pip install -r requirements.txt
 ```
 
+2. Install Playwright browsers:
+
+```bash
+playwright install chromium
+```
+
+Note: This scraper uses Playwright to run a real browser instance, which helps bypass Amazon's bot detection.
+
 ## Usage
 
 ### Basic Usage
@@ -96,20 +104,23 @@ The script generates a JSON file with the following structure:
 ## How It Works
 
 1. **ASIN Extraction**: Extracts the product ASIN from the provided Amazon URL
-2. **Page Navigation**: Automatically handles pagination to fetch all review pages
-3. **Data Extraction**: Parses each review using BeautifulSoup to extract all available information
-4. **Progress Display**: Shows real-time progress including page number and reviews count
-5. **Smart Delays**: Implements random delays between requests to avoid rate limiting
-6. **Error Handling**: Includes retry logic for network errors and graceful failure handling
-7. **JSON Export**: Saves all scraped data to a well-structured JSON file
+2. **Browser Automation**: Uses Playwright to launch a real Chromium browser that mimics human behavior
+3. **Bot Detection Bypass**: Real browser instance helps bypass Amazon's anti-scraping measures
+4. **Page Navigation**: Automatically handles pagination to fetch all review pages
+5. **Data Extraction**: Parses each review using BeautifulSoup to extract all available information
+6. **Progress Display**: Shows real-time progress including page number and reviews count
+7. **Smart Delays**: Implements random delays between requests to avoid rate limiting
+8. **Error Handling**: Includes graceful failure handling and browser cleanup
+9. **JSON Export**: Saves all scraped data to a well-structured JSON file
 
 ## Important Notes
 
+- **Browser Automation**: This scraper uses Playwright to run a real browser instance, which is more reliable than simple HTTP requests
 - **Rate Limiting**: The scraper includes delays between requests to be respectful to Amazon's servers
-- **Blocking Risk**: Amazon may block requests if scraping too aggressively. Use reasonable delays.
+- **Bot Detection**: Uses browser automation to bypass Amazon's anti-bot measures (updated November 2025)
 - **Amazon's Terms**: Web scraping may violate Amazon's Terms of Service. Use responsibly and at your own risk.
-- **Dynamic Content**: This scraper uses requests/BeautifulSoup. If Amazon's page structure changes significantly, the scraper may need updates.
-- **Interruption**: Press Ctrl+C to stop scraping. You'll be prompted to save partial results.
+- **Headless Mode**: Runs in headless mode by default (no visible browser window)
+- **Interruption**: Press Ctrl+C to stop scraping. The browser will close automatically and you'll be prompted to save partial results.
 
 ## Troubleshooting
 
@@ -117,15 +128,26 @@ The script generates a JSON file with the following structure:
 - Check if the product URL is valid
 - Verify the product has reviews
 - Amazon may have changed their HTML structure
+- Try running in non-headless mode to see what's happening (modify `headless=False` in the code)
+
+**Browser/Playwright errors:**
+- Make sure you ran `playwright install chromium` after installing requirements
+- Check that you have enough disk space for the browser
+- On Linux, you may need additional system dependencies
 
 **Request errors:**
 - Check your internet connection
 - Try increasing the delay between requests
 - Amazon may be blocking your IP temporarily
+- If you see 403 errors, Amazon's bot detection may have improved - try adjusting browser settings
 
 **Parsing errors:**
 - Amazon's page structure may have changed
 - Some review fields may not be available for all reviews
+
+**Installation issues:**
+- If Playwright installation fails, try: `pip install --upgrade playwright && playwright install chromium`
+- On Linux servers without a display, headless mode (default) should work fine
 
 ## Example
 
