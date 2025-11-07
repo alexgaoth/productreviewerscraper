@@ -50,6 +50,9 @@ python amazon_reviews_scraper.py "https://www.amazon.com/dp/YOUR_PRODUCT_ASIN" -
 # Custom delay range (3-7 seconds between requests)
 python amazon_reviews_scraper.py "https://www.amazon.com/dp/YOUR_PRODUCT_ASIN" --delay 3 7
 
+# Enable debug mode (saves HTML files for inspection)
+python amazon_reviews_scraper.py "https://www.amazon.com/dp/YOUR_PRODUCT_ASIN" --debug
+
 # Combine options
 python amazon_reviews_scraper.py "https://www.amazon.com/dp/YOUR_PRODUCT_ASIN" --max-pages 5 --output custom.json --delay 1 3
 ```
@@ -59,6 +62,7 @@ python amazon_reviews_scraper.py "https://www.amazon.com/dp/YOUR_PRODUCT_ASIN" -
 - `--max-pages N` - Maximum number of pages to scrape (default: all pages)
 - `--output FILE` - Output filename (default: amazon_reviews.json)
 - `--delay MIN MAX` - Delay range in seconds between requests (default: 2 5)
+- `--debug` - Enable debug mode (saves HTML files when no reviews found)
 
 ## Output Format
 
@@ -113,19 +117,50 @@ The script generates a JSON file with the following structure:
 
 ## Troubleshooting
 
-**No reviews found:**
-- Check if the product URL is valid
-- Verify the product has reviews
-- Amazon may have changed their HTML structure
+### No reviews found
 
-**Request errors:**
+If the scraper reports no reviews found:
+
+1. **Verify the product URL** - Make sure the URL is a valid Amazon product page with reviews
+2. **Use debug mode** - Run with `--debug` flag to save HTML files for inspection:
+   ```bash
+   python amazon_reviews_scraper.py "YOUR_URL" --debug
+   ```
+   This will create `debug_page_1.html` files you can open in a browser to see what Amazon returned
+
+3. **Check for blocking** - The scraper will detect CAPTCHA and blocking messages
+   - If blocked, try: Using a VPN, increasing delays, or waiting before trying again
+   - Amazon actively blocks scrapers
+
+4. **Check debug output** - When debug mode is enabled, you'll see:
+   - Number of review elements found
+   - All data-hook values on the page
+   - Detailed parsing errors
+
+### Request errors
+
 - Check your internet connection
-- Try increasing the delay between requests
-- Amazon may be blocking your IP temporarily
+- Try increasing the delay between requests: `--delay 3 7`
+- Amazon may be blocking your IP temporarily - try again later or use a VPN
 
-**Parsing errors:**
-- Amazon's page structure may have changed
-- Some review fields may not be available for all reviews
+### Being blocked by Amazon
+
+Amazon actively tries to block automated scraping. Signs you're blocked:
+- CAPTCHA page displayed
+- "Robot Check" message
+- Empty reviews despite product having reviews
+
+**Solutions:**
+- Increase delays: `--delay 5 10`
+- Use a VPN to change your IP
+- Try from a different network
+- Wait a few hours before trying again
+- Consider using Amazon's official API instead
+
+### Parsing errors
+
+- Amazon's page structure may have changed - check for scraper updates
+- Some review fields may not be available for all reviews (expected behavior)
 
 ## Example
 
