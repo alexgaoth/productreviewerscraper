@@ -2,9 +2,10 @@
 """
 Amazon Product Reviews Scraper
 Scrapes all reviews from an Amazon product page and saves them to a JSON file.
+Uses Playwright with real browser to bypass Amazon's bot detection.
 """
 
-import requests
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 from bs4 import BeautifulSoup
 import json
 import time
@@ -19,34 +20,54 @@ import sys
 class AmazonReviewsScraper:
     """Scraper for Amazon product reviews."""
 
-    def __init__(self, product_url: str):
+    def __init__(self, product_url: str, headless: bool = True):
         """
         Initialize the scraper with a product URL.
 
         Args:
             product_url: The Amazon product page URL
+            headless: Whether to run browser in headless mode (default: True)
         """
         self.product_url = product_url
         self.asin = self._extract_asin(product_url)
         self.reviews = []
         self.product_title = ""
+        self.headless = headless
+        self.playwright = None
+        self.browser = None
+        self.page = None
 
-        # Headers to mimic a real browser
-        self.headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'none',
-            'Cache-Control': 'max-age=0',
-        }
+    def _init_browser(self):
+        """Initialize the Playwright browser."""
+        if self.playwright is None:
+            self.playwright = sync_playwright().start()
+            # Use chromium with realistic settings
+            self.browser = self.playwright.chromium.launch(
+                headless=self.headless,
+                args=[
+                    '--disable-blink-features=AutomationControlled',
+                ]
+            )
+            # Create context with realistic viewport and user agent
+            context = self.browser.new_context(
+                viewport={'width': 1920, 'height': 1080},
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            )
+            self.page = context.new_page()
+            print("Initialized Playwright browser")
 
-        self.session = requests.Session()
-        self.session.headers.update(self.headers)
+    def _close_browser(self):
+        """Close the Playwright browser."""
+        if self.page:
+            self.page.close()
+            self.page = None
+        if self.browser:
+            self.browser.close()
+            self.browser = None
+        if self.playwright:
+            self.playwright.stop()
+            self.playwright = None
+        print("Closed browser")
 
     def _extract_asin(self, url: str) -> str:
         """
@@ -244,7 +265,7 @@ class AmazonReviewsScraper:
 
         return 0
 
-    def scrape_reviews(self, max_pages: Optional[int] = None, delay_range: tuple = (2, 5)) -> Dict:
+    def scrape_reviews(self, max_pages: Optional[int] = None, delay_range: tuple = (3, 6)) -> Dict:
         """
         Scrape all reviews from the product.
 
@@ -258,99 +279,102 @@ class AmazonReviewsScraper:
         print(f"Starting to scrape reviews for ASIN: {self.asin}")
         print(f"Product URL: {self.product_url}\n")
 
+        # Initialize the browser
+        self._init_browser()
+
         page_number = 1
         total_scraped = 0
         consecutive_empty_pages = 0
         max_consecutive_empty = 3
 
-        while True:
-            # Check if we've reached max pages
-            if max_pages and page_number > max_pages:
-                print(f"\nReached maximum page limit: {max_pages}")
-                break
-
-            # Construct reviews URL
-            reviews_url = self._get_reviews_url(page_number)
-
-            print(f"Scraping page {page_number}...")
-
-            try:
-                # Make request with retry logic
-                max_retries = 3
-                for attempt in range(max_retries):
-                    try:
-                        response = self.session.get(reviews_url, timeout=30)
-                        response.raise_for_status()
-                        break
-                    except requests.exceptions.RequestException as e:
-                        if attempt < max_retries - 1:
-                            wait_time = (attempt + 1) * 2
-                            print(f"  Request failed, retrying in {wait_time}s... ({attempt + 1}/{max_retries})")
-                            time.sleep(wait_time)
-                        else:
-                            raise
-
-                # Parse HTML
-                soup = BeautifulSoup(response.content, 'html.parser')
-
-                # Get product title from first page
-                if page_number == 1:
-                    self.product_title = self._get_product_title(soup)
-                    total_reviews = self._get_total_reviews_count(soup)
-                    print(f"Product: {self.product_title}")
-                    print(f"Total reviews available: {total_reviews}\n")
-
-                # Find all review elements
-                review_elements = soup.find_all('div', {'data-hook': 'review'})
-
-                if not review_elements:
-                    consecutive_empty_pages += 1
-                    print(f"  No reviews found on page {page_number}")
-
-                    if consecutive_empty_pages >= max_consecutive_empty:
-                        print(f"\nNo reviews found on {max_consecutive_empty} consecutive pages. Stopping.")
-                        break
-
-                    # Wait and try next page
-                    time.sleep(random.uniform(*delay_range))
-                    page_number += 1
-                    continue
-
-                # Reset consecutive empty pages counter
-                consecutive_empty_pages = 0
-
-                # Parse each review
-                page_reviews = 0
-                for review_elem in review_elements:
-                    review_data = self._parse_review(review_elem)
-                    if review_data:
-                        self.reviews.append(review_data)
-                        page_reviews += 1
-                        total_scraped += 1
-
-                print(f"  Found {page_reviews} reviews on page {page_number} (Total: {total_scraped})")
-
-                # Check if there's a next page
-                next_button = soup.find('li', class_='a-last')
-                if not next_button or 'a-disabled' in next_button.get('class', []):
-                    print(f"\nReached last page (page {page_number})")
+        try:
+            while True:
+                # Check if we've reached max pages
+                if max_pages and page_number > max_pages:
+                    print(f"\nReached maximum page limit: {max_pages}")
                     break
 
-                # Random delay between requests to avoid being blocked
-                delay = random.uniform(*delay_range)
-                print(f"  Waiting {delay:.1f}s before next page...")
-                time.sleep(delay)
+                # Construct reviews URL
+                reviews_url = self._get_reviews_url(page_number)
 
-                page_number += 1
+                print(f"Scraping page {page_number}...")
 
-            except requests.exceptions.RequestException as e:
-                print(f"\nError fetching page {page_number}: {e}")
-                print("Stopping scrape due to network error.")
-                break
-            except Exception as e:
-                print(f"\nUnexpected error on page {page_number}: {e}")
-                print("Stopping scrape due to error.")
-                break
+                try:
+                    # Navigate to reviews page
+                    self.page.goto(reviews_url, wait_until='domcontentloaded', timeout=60000)
+
+                    # Wait a bit for dynamic content to load
+                    time.sleep(3)
+
+                    # Try to wait for review elements to be present
+                    try:
+                        self.page.wait_for_selector('[data-hook="review"]', timeout=10000)
+                    except PlaywrightTimeoutError:
+                        # Reviews might not be present, continue anyway
+                        pass
+
+                    # Get page source and parse with BeautifulSoup
+                    page_source = self.page.content()
+                    soup = BeautifulSoup(page_source, 'html.parser')
+
+                    # Get product title from first page
+                    if page_number == 1:
+                        self.product_title = self._get_product_title(soup)
+                        total_reviews = self._get_total_reviews_count(soup)
+                        print(f"Product: {self.product_title}")
+                        print(f"Total reviews available: {total_reviews}\n")
+
+                    # Find all review elements
+                    review_elements = soup.find_all('div', {'data-hook': 'review'})
+
+                    if not review_elements:
+                        consecutive_empty_pages += 1
+                        print(f"  No reviews found on page {page_number}")
+
+                        if consecutive_empty_pages >= max_consecutive_empty:
+                            print(f"\nNo reviews found on {max_consecutive_empty} consecutive pages. Stopping.")
+                            break
+
+                        # Wait and try next page
+                        time.sleep(random.uniform(*delay_range))
+                        page_number += 1
+                        continue
+
+                    # Reset consecutive empty pages counter
+                    consecutive_empty_pages = 0
+
+                    # Parse each review
+                    page_reviews = 0
+                    for review_elem in review_elements:
+                        review_data = self._parse_review(review_elem)
+                        if review_data:
+                            self.reviews.append(review_data)
+                            page_reviews += 1
+                            total_scraped += 1
+
+                    print(f"  Found {page_reviews} reviews on page {page_number} (Total: {total_scraped})")
+
+                    # Check if there's a next page
+                    next_button = soup.find('li', class_='a-last')
+                    if not next_button or 'a-disabled' in next_button.get('class', []):
+                        print(f"\nReached last page (page {page_number})")
+                        break
+
+                    # Random delay between requests to avoid being blocked
+                    delay = random.uniform(*delay_range)
+                    print(f"  Waiting {delay:.1f}s before next page...")
+                    time.sleep(delay)
+
+                    page_number += 1
+
+                except Exception as e:
+                    print(f"\nUnexpected error on page {page_number}: {e}")
+                    print("Stopping scrape due to error.")
+                    break
+
+        finally:
+            # Always close the browser when done
+            self._close_browser()
 
         print(f"\n{'='*60}")
         print(f"Scraping completed!")
@@ -450,24 +474,33 @@ def main():
         print("\n\nScraping interrupted by user.")
         print(f"Partial data scraped: {len(scraper.reviews) if 'scraper' in locals() else 0} reviews")
 
-        if 'scraper' in locals() and scraper.reviews:
-            save_partial = input("Save partial results? (y/n): ").strip().lower()
-            if save_partial == 'y':
-                output_data = {
-                    'product_asin': scraper.asin,
-                    'product_title': scraper.product_title,
-                    'product_url': scraper.product_url,
-                    'total_reviews': len(scraper.reviews),
-                    'scrape_date': datetime.now().isoformat(),
-                    'reviews': scraper.reviews,
-                    'note': 'Partial scrape - interrupted by user'
-                }
-                scraper.save_to_json(output_data, output_file)
+        if 'scraper' in locals():
+            # Close the browser if it's open
+            scraper._close_browser()
+
+            if scraper.reviews:
+                save_partial = input("Save partial results? (y/n): ").strip().lower()
+                if save_partial == 'y':
+                    output_data = {
+                        'product_asin': scraper.asin,
+                        'product_title': scraper.product_title,
+                        'product_url': scraper.product_url,
+                        'total_reviews': len(scraper.reviews),
+                        'scrape_date': datetime.now().isoformat(),
+                        'reviews': scraper.reviews,
+                        'note': 'Partial scrape - interrupted by user'
+                    }
+                    scraper.save_to_json(output_data, output_file)
         sys.exit(0)
     except Exception as e:
         print(f"\nUnexpected error: {e}")
         import traceback
         traceback.print_exc()
+
+        # Close the browser if it's open
+        if 'scraper' in locals():
+            scraper._close_browser()
+
         sys.exit(1)
 
 
