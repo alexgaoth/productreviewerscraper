@@ -43,7 +43,7 @@ Note: This scraper uses Playwright to run a real browser instance, which helps b
 ### Basic Usage
 
 ```bash
-python amazon_reviews_scraper.py "https://www.amazon.com/dp/YOUR_PRODUCT_ASIN"
+python amazon_reviews_scraper.py "https://www.amazon.com/dp/B0BFFYB8PK"
 ```
 
 ### Advanced Usage
