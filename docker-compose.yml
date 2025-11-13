@@ -1,0 +1,99 @@
+version: '3.8'
+
+services:
+  # PostgreSQL database (optional, can use SQLite for development)
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: reviews_user
+      POSTGRES_PASSWORD: reviews_pass
+      POSTGRES_DB: seller_reviews
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U reviews_user"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis for Celery
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # FastAPI web service
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://reviews_user:reviews_pass@db:5432/seller_reviews
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./app:/app/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # Celery worker
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    environment:
+      - DATABASE_URL=postgresql://reviews_user:reviews_pass@db:5432/seller_reviews
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./app:/app/app
+    command: celery -A app.worker.celery_app worker --loglevel=info --concurrency=4
+
+  # Celery beat (optional, for scheduled tasks)
+  beat:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    environment:
+      - DATABASE_URL=postgresql://reviews_user:reviews_pass@db:5432/seller_reviews
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./app:/app/app
+    command: celery -A app.worker.celery_app beat --loglevel=info
+
+volumes:
+  postgres_data:
+  redis_data:

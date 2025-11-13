@@ -1,21 +1,48 @@
-# Use Playwright's official Python image (includes Python, browsers, and dependencies)
-FROM mcr.microsoft.com/playwright/python:v1.55.0-jammy
+# Multi-stage build for Python application
+FROM python:3.11-slim as builder
 
-# Set working directory inside container
+# Set working directory
 WORKDIR /app
 
-# Copy dependency file first (for better build caching)
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements
 COPY requirements.txt .
 
-# Upgrade pip & install dependencies efficiently
-RUN pip install --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+# Install Python dependencies
+RUN pip install --no-cache-dir --user -r requirements.txt
 
-# Copy the rest of your project files
-COPY . .
 
-# Install Playwright browsers (safeguard in case they're missing)
-RUN playwright install --with-deps chromium
+# Final stage
+FROM python:3.11-slim
 
-# Set default command to run your scraper
-CMD ["python", "amazon_reviews_scraper.py"]
+# Set working directory
+WORKDIR /app
+
+# Copy Python dependencies from builder
+COPY --from=builder /root/.local /root/.local
+
+# Copy application code
+COPY app/ ./app/
+COPY .env.example ./.env.example
+
+# Make sure scripts in .local are usable
+ENV PATH=/root/.local/bin:$PATH
+
+# Create non-root user
+RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+USER appuser
+
+# Expose port
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD python -c "import requests; requests.get('http://localhost:8000/health')"
+
+# Default command (can be overridden)
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
