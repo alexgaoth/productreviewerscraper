@@ -42,23 +42,27 @@ class S3StorageClient:
     def _generate_raw_key(
         self,
         seller_id: str,
-        marketplace_id: str,
-        asin: str,
         job_id: str,
         page_token: str = "page1",
+        platform: str = "amazon",
+        marketplace_id: Optional[str] = None,
+        asin: Optional[str] = None,
+        product_id: Optional[str] = None,
         timestamp: Optional[datetime] = None,
     ) -> str:
         """
-        Generate S3 key for raw data.
+        Generate S3 key for raw data with platform support.
 
-        Format: raw/{seller_id}/{marketplace_id}/{asin}/{YYYY}/{MM}/{DD}/{job_id}/{page_token}.json
+        Format: raw/{platform}/{seller_id}/{item_id}/{YYYY}/{MM}/{DD}/{job_id}/{page_token}.json
 
         Args:
-            seller_id: Seller ID
-            marketplace_id: Marketplace ID
-            asin: Product ASIN
+            seller_id: Seller/Shop ID
             job_id: Job ID
             page_token: Page identifier
+            platform: Platform name (amazon, shopify, etc.)
+            marketplace_id: Marketplace ID (Amazon only, for legacy compat)
+            asin: Product ASIN (Amazon)
+            product_id: Product ID (Shopify)
             timestamp: Optional timestamp (defaults to now)
 
         Returns:
@@ -67,8 +71,16 @@ class S3StorageClient:
         if timestamp is None:
             timestamp = datetime.utcnow()
 
+        # Determine item identifier based on platform
+        if platform == "amazon":
+            item_id = f"{marketplace_id}/{asin}" if marketplace_id and asin else asin or "unknown"
+        elif platform == "shopify":
+            item_id = product_id or "all"
+        else:
+            item_id = asin or product_id or "unknown"
+
         return (
-            f"raw/{seller_id}/{marketplace_id}/{asin}/"
+            f"raw/{platform}/{seller_id}/{item_id}/"
             f"{timestamp.year:04d}/{timestamp.month:02d}/{timestamp.day:02d}/"
             f"{job_id}/{page_token}.json"
         )
@@ -76,21 +88,25 @@ class S3StorageClient:
     def _generate_processed_key(
         self,
         seller_id: str,
-        marketplace_id: str,
-        asin: str,
         job_id: str,
+        platform: str = "amazon",
+        marketplace_id: Optional[str] = None,
+        asin: Optional[str] = None,
+        product_id: Optional[str] = None,
         timestamp: Optional[datetime] = None,
     ) -> str:
         """
-        Generate S3 key for processed data.
+        Generate S3 key for processed data with platform support.
 
-        Format: processed/{seller_id}/{marketplace_id}/{asin}/{YYYY}/{MM}/{DD}/{job_id}.json
+        Format: processed/{platform}/{seller_id}/{item_id}/{YYYY}/{MM}/{DD}/{job_id}.json
 
         Args:
-            seller_id: Seller ID
-            marketplace_id: Marketplace ID
-            asin: Product ASIN
+            seller_id: Seller/Shop ID
             job_id: Job ID
+            platform: Platform name (amazon, shopify, etc.)
+            marketplace_id: Marketplace ID (Amazon only, for legacy compat)
+            asin: Product ASIN (Amazon)
+            product_id: Product ID (Shopify)
             timestamp: Optional timestamp (defaults to now)
 
         Returns:
@@ -99,8 +115,16 @@ class S3StorageClient:
         if timestamp is None:
             timestamp = datetime.utcnow()
 
+        # Determine item identifier based on platform
+        if platform == "amazon":
+            item_id = f"{marketplace_id}/{asin}" if marketplace_id and asin else asin or "unknown"
+        elif platform == "shopify":
+            item_id = product_id or "all"
+        else:
+            item_id = asin or product_id or "unknown"
+
         return (
-            f"processed/{seller_id}/{marketplace_id}/{asin}/"
+            f"processed/{platform}/{seller_id}/{item_id}/"
             f"{timestamp.year:04d}/{timestamp.month:02d}/{timestamp.day:02d}/"
             f"{job_id}.json"
         )
@@ -108,23 +132,27 @@ class S3StorageClient:
     async def save_raw_response(
         self,
         seller_id: str,
-        marketplace_id: str,
-        asin: str,
         job_id: str,
         page_token: str,
         data: Dict[str, Any],
+        platform: str = "amazon",
+        marketplace_id: Optional[str] = None,
+        asin: Optional[str] = None,
+        product_id: Optional[str] = None,
         metadata: Optional[Dict[str, str]] = None,
     ) -> str:
         """
-        Save raw SP-API response to S3.
+        Save raw API response to S3 with platform support.
 
         Args:
-            seller_id: Seller ID
-            marketplace_id: Marketplace ID
-            asin: Product ASIN
+            seller_id: Seller/Shop ID
             job_id: Job ID
             page_token: Page identifier
             data: Raw API response data
+            platform: Platform name (amazon, shopify, etc.)
+            marketplace_id: Marketplace ID (Amazon)
+            asin: Product ASIN (Amazon)
+            product_id: Product ID (Shopify)
             metadata: Optional S3 object metadata
 
         Returns:
@@ -133,20 +161,33 @@ class S3StorageClient:
         Raises:
             Exception: If S3 upload fails
         """
-        key = self._generate_raw_key(seller_id, marketplace_id, asin, job_id, page_token)
+        key = self._generate_raw_key(
+            seller_id=seller_id,
+            job_id=job_id,
+            page_token=page_token,
+            platform=platform,
+            marketplace_id=marketplace_id,
+            asin=asin,
+            product_id=product_id,
+        )
 
         # Convert to JSON
         json_data = json.dumps(data, indent=2)
 
         # Prepare metadata
         s3_metadata = {
+            "platform": platform,
             "seller_id": seller_id,
-            "marketplace_id": marketplace_id,
-            "asin": asin,
             "job_id": job_id,
             "page_token": page_token,
             "fetched_at": datetime.utcnow().isoformat(),
         }
+        if marketplace_id:
+            s3_metadata["marketplace_id"] = marketplace_id
+        if asin:
+            s3_metadata["asin"] = asin
+        if product_id:
+            s3_metadata["product_id"] = product_id
         if metadata:
             s3_metadata.update(metadata)
 
@@ -171,22 +212,26 @@ class S3StorageClient:
     async def save_normalized_data(
         self,
         seller_id: str,
-        marketplace_id: str,
-        asin: str,
         job_id: str,
         normalized_data: Dict[str, Any],
+        platform: str = "amazon",
+        marketplace_id: Optional[str] = None,
+        asin: Optional[str] = None,
+        product_id: Optional[str] = None,
         compress: bool = False,
         metadata: Optional[Dict[str, str]] = None,
     ) -> str:
         """
-        Save normalized review data to S3.
+        Save normalized review data to S3 with platform support.
 
         Args:
-            seller_id: Seller ID
-            marketplace_id: Marketplace ID
-            asin: Product ASIN
+            seller_id: Seller/Shop ID
             job_id: Job ID
             normalized_data: Normalized review data
+            platform: Platform name (amazon, shopify, etc.)
+            marketplace_id: Marketplace ID (Amazon)
+            asin: Product ASIN (Amazon)
+            product_id: Product ID (Shopify)
             compress: Whether to gzip compress
             metadata: Optional S3 object metadata
 
@@ -196,7 +241,14 @@ class S3StorageClient:
         Raises:
             Exception: If S3 upload fails
         """
-        key = self._generate_processed_key(seller_id, marketplace_id, asin, job_id)
+        key = self._generate_processed_key(
+            seller_id=seller_id,
+            job_id=job_id,
+            platform=platform,
+            marketplace_id=marketplace_id,
+            asin=asin,
+            product_id=product_id,
+        )
 
         if compress:
             key += ".gz"
@@ -216,13 +268,18 @@ class S3StorageClient:
 
         # Prepare metadata
         s3_metadata = {
+            "platform": platform,
             "seller_id": seller_id,
-            "marketplace_id": marketplace_id,
-            "asin": asin,
             "job_id": job_id,
             "reviews_count": str(normalized_data.get("reviews_count", 0)),
             "processed_at": datetime.utcnow().isoformat(),
         }
+        if marketplace_id:
+            s3_metadata["marketplace_id"] = marketplace_id
+        if asin:
+            s3_metadata["asin"] = asin
+        if product_id:
+            s3_metadata["product_id"] = product_id
         if metadata:
             s3_metadata.update(metadata)
 
@@ -251,25 +308,37 @@ class S3StorageClient:
     def check_page_exists(
         self,
         seller_id: str,
-        marketplace_id: str,
-        asin: str,
         job_id: str,
         page_token: str,
+        platform: str = "amazon",
+        marketplace_id: Optional[str] = None,
+        asin: Optional[str] = None,
+        product_id: Optional[str] = None,
     ) -> bool:
         """
         Check if a raw page already exists in S3 (for idempotency).
 
         Args:
-            seller_id: Seller ID
-            marketplace_id: Marketplace ID
-            asin: Product ASIN
+            seller_id: Seller/Shop ID
             job_id: Job ID
             page_token: Page identifier
+            platform: Platform name (amazon, shopify, etc.)
+            marketplace_id: Marketplace ID (Amazon)
+            asin: Product ASIN (Amazon)
+            product_id: Product ID (Shopify)
 
         Returns:
             True if page exists, False otherwise
         """
-        key = self._generate_raw_key(seller_id, marketplace_id, asin, job_id, page_token)
+        key = self._generate_raw_key(
+            seller_id=seller_id,
+            job_id=job_id,
+            page_token=page_token,
+            platform=platform,
+            marketplace_id=marketplace_id,
+            asin=asin,
+            product_id=product_id,
+        )
 
         try:
             self.s3_client.head_object(Bucket=self.raw_bucket, Key=key)

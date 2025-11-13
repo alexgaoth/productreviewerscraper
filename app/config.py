@@ -70,6 +70,16 @@ class Settings(BaseSettings):
         alias="SPAPI_ENDPOINT_FE"
     )
 
+    # Shopify OAuth
+    shopify_client_id: Optional[str] = Field(default=None, alias="SHOPIFY_CLIENT_ID")
+    shopify_client_secret: Optional[str] = Field(default=None, alias="SHOPIFY_CLIENT_SECRET")
+    shopify_redirect_uri: Optional[str] = Field(default=None, alias="SHOPIFY_REDIRECT_URI")
+    shopify_api_version: str = Field(default="2024-10", alias="SHOPIFY_API_VERSION")
+    shopify_scopes: str = Field(
+        default="read_products,read_product_listings,read_orders,read_customers",
+        alias="SHOPIFY_SCOPES"
+    )
+
     # Encryption (for refresh tokens)
     encryption_key: str = Field(alias="ENCRYPTION_KEY")
 
